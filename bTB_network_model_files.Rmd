@@ -1,0 +1,618 @@
+---
+title: "bTB Network Model Input / Output"
+author: "Daniel Bal&aacute;&#x17E;"
+date: "`r format(Sys.Date(), '%d %B %Y')`"
+output:
+  html_document:
+    toc: yes
+  pdf_document: default
+header-includes:
+- \usepackage{color}
+- \usepackage[usenames,dvipsnames]{xcolor}
+- \usepackage{tabu} 
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(cache = TRUE, echo = FALSE, eval = TRUE)
+library(magrittr)
+```
+
+```{r, include=FALSE,eval=FALSE}
+options(tinytex.verbose = TRUE)
+```
+
+```{r text-color_output-format-independent}
+# https://stackoverflow.com/a/37122306
+
+colors_custom <-
+  tibble::tibble(
+    Name =
+      c("brickred", "note_to_self", "note", "script"),
+    HexCode =
+      c("#cc4054", "#20AA88", "#BBBBBB", "#20AAFF")
+  )
+
+colorToHTML <- function(color) {
+  convert <- colors_custom %>% dplyr::filter(Name == color)
+  if (nrow(convert) == 1)
+    return (convert %$% HexCode)
+  else
+    return (color)
+}
+
+#Color Format
+colFmt = function(x, color){
+  outputFormat = knitr::opts_knit$get("rmarkdown.pandoc.to")
+  if(outputFormat == 'latex') {
+    paste("\\textcolor{", color, "}{",
+          stringr::str_replace_all(x, stringr::coll("_"), "\\_")
+          ,"}",sep="")
+  } else if(outputFormat == 'html') {
+    paste("<font color='", colorToHTML(color), "'>", x, "</font>", sep = "")
+  } else
+    x
+}
+
+not_model_input <- "brickred"
+```
+
+
+The simulation model uses the following compartments (disease stages): Susceptible `S`, Exposed `E`, Test-sensitive `T`, and Infectious `I`. The `S`-`E`-`T`-`I` epidemiological model is used for farmed animals, and `S`-`I` for wildlife.
+
+
+# Main input file
+
+The main input file is an xml file. Apart from this file, the model requires quite a number of other input files
+
+In this file, there are:
+
+1. Calibration parameters 
+1. Calibration procedure parameters
+1. Model parameters
+1. Input / output file names
+
+The input / output file names are listed at the end of the main input file (.xml) but, in order to introduce all the other input files at the beginning of the document, they are listed here first. The format and example content of those files will be detailed later.
+
+The only difference between *calibration* and *model* parameters is that the *calibration* parameters change within a range of values during the calibration procedure, while the *model* parameters are constant throughout. *Model* paremeters then are categorized as *simulation* parameters, i.e. parameters that are used in the simulation and *calibration procedure* parameters, i.e. parameters that govern the calibration procedure. If one does not wish to perform a calibration procedure, only to run a simulation, one needs to do: 1) fix the *calibration* parameters by setting the minimum, maximum, and initial values to the same value, 2) set some calibration procedure to values explained in `Calibration procedure parameters` subsection.
+
+## Input / output files
+
+```{r main_files}
+table_main_files_in <- tibble::tibble(
+  stage = c("simulation",
+            "simulation",
+            "simulation",
+            "simulation",
+            "simulation",
+            "simulation",
+            "simulation",
+            "simulation",
+            "calibration",
+            "calibration",
+            "calibration"),
+  species = c("cattle",
+              "cattle",
+              "cattle",
+              "cattle",
+              "badgers",
+              "badgers",
+              "badgers",
+              "inter-species",
+              "cattle",
+              "badgers",
+              "inter-species"),
+  description = c("IDs", "movements", "herd size distribution", "deaths",
+                  "IDs", "movements", "sett size distribution",
+                  "contact network",
+                  "sampling frequency", "sampling frequency", "genetic distances histogram"),
+  `parameter name` = c("FarmData", "CattleMovementDistribution", "initialHerdSizes", "CattleDeathDistribution",
+           "ReservoirData", "BadgerMovementDistribution", "initialReservoirSizes",
+           "reservoirLocations",
+           "CattleSamplingRatesPerYear", "BadgerSamplingRatesPerYear", "observedPairwiseDistanceFile"),
+  `file name` = c("`farm_ID.csv`", "`cattle_movements.csv`", "`herd-size-distr.csv`", "`cattle_deaths.csv`",
+           "`reservoir_ID.csv`", "`badger_movements.csv`", "`sett-size-distr.csv`",
+           "`contact_network.dat`",
+           "`cattle_sampling.csv`", "`badger_sampling.csv`", "`gen-dist-hist.csv`")
+)
+
+suppressMessages(
+  knitr::kable(table_main_files_in,
+               format = knitr::opts_knit$get("rmarkdown.pandoc.to"),
+               caption = "List of all input files specified in the main input file. __file name__ gives examples of file names (can be changed) that are used in the example input file (bTB_net_tmp.xml).",
+               escape = FALSE) %>%
+    kableExtra::column_spec(1, bold = TRUE) %>%
+    kableExtra::column_spec(2, bold = TRUE) %>%
+    kableExtra::column_spec(5, color = "grey") %>%
+    kableExtra::collapse_rows(1:2, valign = "top") %>%
+    kableExtra::kable_styling(full_width = TRUE, bootstrap_options = "basic", latex_options = "scale_down")
+)
+```
+
+
+## Calibration parameters
+
+For all calibration parameters, one needs to set three tags in the input file, `initialVal`, `min`, and `max`, i.e. the initial, minimum, and maximum values of the parameter. For obvious reasons, there is the following constraint: `min` $\le$ `initialVal` $\le$ `max`.
+
+```{r main_calib}
+table_main_calib <- tibble::tibble(
+  name = c("beta_CC",
+           "beta_BB",
+           "beta_BC",
+           "beta_CB",
+           "sigma",
+           "gamma",
+           "testSensitivity",
+           "mutationRate"),
+  description = c("Transmission rate: cattle $\\rightarrow$ cattle",
+                  "Transmission rate: badger $\\rightarrow$ badger",
+                  "Transmission rate: badger $\\rightarrow$ cattle",
+                  "Transmission rate: cattle $\\rightarrow$ badger",
+                  "Disease stage transition rate: $E \\rightarrow T$",
+                  "Disease stage transition rate: $T \\rightarrow I$",
+                  "Sensitivity of the SICCT test",
+                  "Mutation rate of the BTB pathogen"),
+  symbol = c("$\\beta_{CC}$",
+             "$\\beta_{BB}$",
+             "$\\beta_{BC}$",
+             "$\\beta_{CB}$",
+             "$\\sigma$",
+             "$\\gamma$",
+             "",
+             "$\\mu$")
+)
+
+knitr::kable(table_main_calib,
+             format = knitr::opts_knit$get("rmarkdown.pandoc.to"),
+             caption = "Calibration parameters of the main input file.",
+             escape = FALSE) %>%
+  kableExtra::column_spec(1, width_min = "12em") %>%
+  kableExtra::column_spec(2, width_min = "24em") %>%
+  kableExtra::kable_styling(full_width = FALSE, bootstrap_options = "basic")
+```
+
+
+## Calibration procedure parameters {#calib_param}
+
+```{r main_calib_proc}
+table_main_calib_proc <- tibble::tibble(
+  name = c("numParticles", "numMcSteps", "numScenarios",
+           "smoothingRatio", "percentageDeviation", "filterShortEpidemics"),
+  description = c("Number of Monte Carlo particles. Particle: a unique set of values of parameters; a point in N-dimensional parameter space, where N is the number of calibrated parameters.",
+                  "Number of steps (perturbations of previous particle) of MC chain.",
+                  "Number of unique simulation runs of a particle at a particular step.",
+                  "??? Keep it \"100\".",
+                  "??? Keep it \"100.0\".",
+                  "Exclude short epidemics. Not sure about the details."),
+  `variable type` = c("Integer", "Integer", "Integer",
+                      "Integer", "Floating point", "Boolean")
+)
+
+knitr::kable(table_main_calib_proc,
+             format = knitr::opts_knit$get("rmarkdown.pandoc.to"),
+             caption = "Parameters controlling the calibration procedure.",
+             escape = FALSE) %>% 
+  kableExtra::kable_styling(bootstrap_options = "basic")
+```
+
+
+`r colFmt("NOTE:", "red")` Not calibrating, just wanting to perform a single simulation of the model? Set `numParticles`, `numMcSteps`, and `numScenarios` to $1$.
+
+
+## Model Parameters
+
+```{r main_model}
+table_main_model <- tibble::tibble(
+  name = c("dateFormat",
+           "startDateMovements",
+           "endDateMovements",
+           "startDate",
+           "endDate",
+           "stepSize",
+           "includeReservoir",
+           "activeReservoir",
+           "stopWithBreakdownDetected",
+           "maxOutbreakSize",
+           "herdSizeFlexible",
+           "reservoirSizeFlexible",
+           "testIntervalInYears",
+           "numHerdsUnderRestrictionInitially",
+           "badgerDeathRate",
+           "initialInfectionStates",
+           "initMutClade",
+           "initBadgersFromCows",
+           "seed"),
+  description = c("Format of dates used in the simulation. Best not to change.",
+                  "Start date of the movement data.",
+                  "End date of the movement data.",
+                  "Start date of the simulation.",
+                  "End date of the simulation.",
+                  "Time step of the simulation (days).",
+                  "Should there be a wildlife reservoir? Typically set to 'true'. Inherited from a previous version, should be removed altogether.",
+                  "Should the reservoir be active, i.e. generate mutations? Typically set to 'true'. Inherited from a previous version, should be removed altogether.",
+                  "When a breakdown is detected, stop the simulation. Typically set to 'false'.",
+                  "The maximum number of breakdowns. When reached, stop the simulation. Typically set quite high, i.e. never stop.",
+                  "When 'true', herd sizes change with on-/off- movements, computationally slightly more demanding. When 'false', the sizes are constant.",
+                  "When 'true', sett (wildlife group) sizes change with on-/off- movements, computationally slightly more demanding. When 'false', the sizes are constant.",
+                  "How often are whole herd tests performed (years).",
+                  "Number of herds under restriction at the start of the simulation.",
+                  "Death rate of badgers (per year).",
+                  "Definition of infection states at the start of the simulation. Any number of potential initial infections separated by `;`. Each infection has the following format: `[animal_ID]:[unit_ID]:[clade_ID]:[probabilities]P(S),P(E),P(T),P(I)`, where `animal_ID` is the animal ID that it will be referred to in the output, `unit_ID` is the unit ID (farm or reservoir, depending on the species of the animal) defined in the [[Farm/Reservoir]Data](#unit_ID) input file, `clade_ID` is an ID of a clade (defined by unique SNPs, see the next parameter `initMutClade`) this animal belongs to, and `probabilities` is a list of relative probabilities of the animal being in one of the allowed compartments, dependent on the animal separated by `,`. The format of `animal_ID` is [species]_[unique string], where [species] may be `Cow` or `Badger`. An example of this string is given below this table.",
+                  "Initial number of mutations per clade.",
+                  "Initialize badger infections in reservoirs directly connected to farms with infected cattle? If true, for each infected cow (in any state except `S`), a connected reservoir is randomly selected, and an infectious badger with the same SNPs is placed there.",
+                  "Seed of the random number generator (RNG). If negative number, the seed is random. If positive, this number is used as the seed for the RNG, with the intention to be able to perform stochastic yet repeatable simulations. Does not work at the moment, so just use '-1' for now."),
+  `variable type` = c("String",
+                      "String in \"dateFormat\".",
+                      "String in \"dateFormat\".",
+                      "String in \"dateFormat\".",
+                      "String in \"dateFormat\".",
+                      "Integer",
+                      "Boolean",
+                      "Boolean",
+                      "Boolean",
+                      "Integer",
+                      "Boolean",
+                      "Boolean",
+                      "Floating point",
+                      "Integer",
+                      "Floating point",
+                      "String",
+                      "Integer",
+                      "Boolean",
+                      "Integer")
+)
+
+knitr::kable(table_main_model,
+             format = knitr::opts_knit$get("rmarkdown.pandoc.to"),
+             caption = "Simulation parameters of the main input file.",
+             escape = FALSE) %>%
+  kableExtra::column_spec(1, width_min = "18em") %>%
+  kableExtra::column_spec(2, width_min = "40em") %>%
+  kableExtra::column_spec(3, width_min = "12em") %>%
+  kableExtra::kable_styling(full_width = TRUE, bootstrap_options = "basic")
+
+```
+
+The `initialInfectionStates` parameter may look like this:
+```
+Cow_seed_1:42:1:0.25,0.25,0.25,0.25;Cow_seed_2:73:2:0.0,0.0,0.0,1.0;Badger_seed_1:3:1:0.2,0.8
+```
+In this case there is a cow on farm `42` in clade `1` with `25%` probability being in each of states (`S`, `E`, `T`, or `I`), a definitely infectious cow on farm `73` in clade `2`, and a badger in reservoir `3` with `80%` probability of being infected, again in clade `1`.
+
+
+
+# Input file names: Model
+
+## [Farm/Reservoir]Data {#unit_ID}
+
+These files list all IDs of all (more or less separate) units where animals live. **FarmData** is where the farmed animals (e.g. cows) live, **ReservoirData** are for groups of wildlife animals (e.g. badger setts).
+
+The format is a single number on each line, representing the ID of a unit, e.g.:
+
+```
+1
+2
+3
+4
+5
+```
+
+In this case, there are 5 units (farm or reservoir, depending on which file it is), labelled $1 .. 5$.
+
+The purpose of this file is mainly anonymisation. There will probably exist a file linking the IDs to farms (e.g. CPH numbers in UK or equivalent for other countries) or to badger social groups etc. This file is not used as input for the model.
+
+
+## [Cattle/Badger]MovementDistribution
+
+These files represent the movement of animals between the units, i.e. cows between farms, badgers or other wildlife between their social groups (setts) etc. On each line there are all recorded movements between a pair of units in the following format:
+
+```
+departureUnit-destinationUnit [comma_separeted_number_of_animals_in_each_event]
+```
+
+First few lines of this file may look like this:
+
+```
+1-2 4,4,2
+1-7 6
+3-5 4,1,1,1
+```
+
+In the case of cattle movements, this means there were movements from farm `1` to farm `2`, 4 cows on 2 occasions and 2 on one, from farm `1` to `7` one mevement of 6 cows, and from farm `3` to `5`, 4 cows once and 1 cow three times.
+
+
+## initial[Herd/Reservoir]Sizes
+
+These files specify the distribution of sizes of units, i.e. farms or social groups etc., in the following format:
+
+```
+size:frequency
+```
+
+Some lines of such file may look like this:
+
+```
+100:75
+110:46
+120:51
+130:49
+```
+
+This would mean there were 75 farms of 100 cows, 46 farms of 110 cows, 51 farms of 120 cows, and 49 farms of 130 cows.
+
+
+## CattleDeathDistribution
+
+This file specifies deaths on farms for each day deaths occurred in the following format:
+
+```
+date_as_integer:[comma_separeted_list_of_farms_with_death]
+```
+
+The date is expressed as an integer, with day 1.1.1900 being day 0.
+
+Some lines of such file may look like this:
+
+```
+31779:1,181
+31782:186,113,113
+31784:45
+```
+
+This would mean that on 4.1.1987 there was a death on farms `1` and `181`, on 7.1.1987 a death on farm `186` and two deaths on farm `113`, and on 9.1.1987 a death on farm `45`.
+
+`r colFmt("NOTE:", "red")` There is no equivalent input file for badgers, their deaths are controlled by the parameter `badgerDeathRate`.
+
+## reservoirLocations
+
+This file defines the contact network between wildlife and farmed animal units, e.g. badger social groups (reservoirs) and cattle farms. Each line defines connections of a reservoir to farms it is connected to in the following format:
+
+```
+RESERVOIR_[reservoir_ID]:[comma_separated_list_of_connected_farms]
+```
+
+Some lines of such file may look like this:
+
+```
+RESERVOIR_013:42,62,74,86,95
+RESERVOIR_014:42,87
+RESERVOIR_015:76,87
+```
+
+This would mean wildlife reservoir `13` is connected to farms `42`, `62`, `74`, `86`, and `95`, reservoir `14` to farms `42` and `87`, and reservoir `15` to farms `76` and `87`. Note that, as each reservoir may be connected to more than one farm, each farm may be connected to more than one reservoir. In the example above, farm `42` is connected to reservoirs `13` and `14`, and farm `87` is connected to reservoirs `14` and `15`.
+
+
+# Input file names: Calibration
+
+The calibration procedure will change and so will the format of these input files. However, for the time being, they are as defined below.
+
+`r colFmt("NOTE:", "red")` If your intention is not to calibre, just to run a single (or multiple) simulation, the content of these files does not matter, but they need to be supplied - so just use some dummy files in the correct format.
+
+## [Cattle/Badger]SamplingRatesPerYear
+
+The purpose of this file is to specify the fraction of detected infections from each year that will be sequenced and used to generate the genetic distance matrix (GDM), which will be compared to the actual sequences. It is a comma separated values file, with four columns: year, number of samples (i.e. sequences used in GDM), number of reactors (i.e. animals that tested positive), and probability of sequencing (i.e. number of samples divided by the number of reactors). A first line commented out with the symbol '#' describing the columns can be supplied. First few lines of such file may look like this:
+
+```
+#year,samples,reactors,probability 
+2000,3,17,0.17647059
+2001,0,23,0.000000
+2002,4,156,0.02564103
+2003,11,167,0.06586826
+```
+
+In this case, in year 2000, there were 17 reactors, 3 of them sequenced, we have no sequences from the year 2001, there were 156 reactors in year 2002, 4 of which we have ssequenced, etc. 
+
+
+## observedPairwiseDistanceFile {#observedPairwiseDistanceFile}
+
+This input file is a histogram of genetic distances (in SNP differences) between all pairs of sequences, in the following format:
+
+```
+[SNP differences between a pair of sequences]:[number of pairs with this SNP distance]
+```
+
+A first few lines may look like this:
+```
+#SNP difference, frequency
+0:72
+1:39
+2:85
+```
+
+In this case, there were 72 pairs of sequences that were identical, 39 pairs with 1 different SNP, and 85 pairs with 2 different SNPs.
+
+
+# Output files
+
+## transmissionNetworkFile
+
+`r colFmt("Name of this output file can be set in the xml input file.", "note")`
+
+Here there are recorded all transmission events. Each line is a new transmission event, columns are separated by tabs, the source is in the first column, the recipient is in the second column. `r colFmt("There is a third column, a number, usually 1.0 - not sure at the moment what the meaning is.", "note_to_self")`
+
+A few lines of such a file may look like this:
+
+```
+Cow_03394	Cow_03478	1.0
+Badger_seed_6	Badger_00002	1.0
+Badger_00283	Badger_00348	1.0
+Badger_02001	Badger_02327	1.0
+Badger_01525	Badger_01917	1.0
+Badger_00226	Cow_00463	1.0
+Cow_02446	Cow_02483	1.0
+```
+
+## observedTransmissionNetworkFile
+
+`r colFmt("Name of this output file can be set in the xml input file.", "note")`
+
+All "observed" transmission events, i.e. event only between individuals that are sampled according to the parameters `[Cattle/Badger]SamplingRatesPerYear`.
+
+## snpDistanceDistributionFile
+
+`r colFmt("Name of this output file can be set in the xml input file.", "note")`
+
+A histogram of genetic distances (in SNP differences) between all pairs of sequences from the simulation, in the same format as the input file [observed pairwise distance file](#observedPairwiseDistanceFile), which is the same type of data for the actual sequences.
+
+
+## Time Series {#time_series}
+
+There are 5 time series files, each giving the relevant number in a time step, separated by commas. The variables that are tracked in this way are:
+- infected herds (units of cattle)
+- infected cows (as total number of individuals)
+- infected reservoirs (units of wildlife/badgers)
+- infected badgers (as total number of individuals)
+- herds under restriction
+
+A part of a file of this type may look like this:
+
+```
+104,105,105,108,106,109,106,105,106,105,107,110,112,112,114,113,114,115,111,111
+```
+`r colFmt("__R script__ merge_time_series.R", "script")` merges these five time series output files, and produces (saves to disk) informative plots.
+
+## Testing
+
+Cattle are tested in the simulation and badgers are "tested" - by this I mean the test of a cow may result in an action (culling, putting a farm under restriction), while the "test" of a badger has no consequence, only of recording the event in this file. There are 3 output (csv) files associated with testing:
+
+- herd test result (level of a herd)
+- cattle test result (level of farmed individual)
+- badger test result (level of wildlife individual)
+
+The contents of these comma separated files are:
+
+### herd test result
+
+```{r out_herd_test}
+table_out_herd_test <- tibble::tibble(
+  `column names` = c("Sceniario_ID", "date", "unit_ID", "infected", "reactors", "reasonOfTesting"),
+  meaning = c("Scenario ID, the number of scenarios run is given by the parameter `numScenarios`, in Table of [calibration parameters](#calib_param). If you are running only 1 scenario, this number will always be $0$.",
+              "The date on which the test was performed.",
+              "The unit ID on which the test was performed.",
+              "The number of infected animals in this unit.",
+              "The number of animals that tested positive (should obviously never be larger than `infected`.",
+              "The reason for performing this test, it can be one of the three: \"abattoir\" (when the animal is being slaughtered), \"WHT\" (whole-herd test), and \"pre-move\" (before movement from farm to farm).")
+)
+
+knitr::kable(table_out_herd_test,
+             format = knitr::opts_knit$get("rmarkdown.pandoc.to"),
+             caption = "Output file detailing __cattle__ test records on the level of a __herd__.",
+             escape = FALSE) %>% 
+  kableExtra::kable_styling(bootstrap_options = "basic")
+```
+
+### cattle test result
+
+```{r out_cattle_test}
+table_out_cattle_test <- tibble::tibble(
+  `column names` = c("Scenario_ID", "date", "unit_ID", "animal_ID", "testResult", "infectionState", "reasonOfTesting"),
+  meaning = c("Scenario ID, the number of scenarios run is given by the parameter `numScenarios`, in Table of [calibration parameters](#calib_param). If you are running only 1 scenario, this number will always be $0$.",
+              "The date on which the test was performed.",
+              "The unit ID on which the test was performed.",
+              "The ID of the animal tested.",
+              "The result of the test (TRUE = positive, FALSE = negative).",
+              "The infectious status (compartment) of the animal. As the model currently implemented for cows is `S`-`E`-`T`-`I`, this field can be `EXPOSED`, `TESTSENSITIVE`, or `INFECTIOUS`.",
+              "The reason for performing this test, it can be one of the three: \"abattoir\" (when the animal is being slaughtered), \"WHT\" (whole-herd test), and \"pre-move\" (before movement from farm to farm).")
+)
+
+knitr::kable(table_out_cattle_test,
+             format = knitr::opts_knit$get("rmarkdown.pandoc.to"),
+             caption = "Output file detailing __cattle__ test records on the level of the __animal__.",
+             escape = FALSE) %>% 
+  kableExtra::kable_styling(bootstrap_options = "basic")
+```
+
+### badger test results
+
+```{r out_badger_test}
+table_out_badger_test <- tibble::tibble(
+  `column names` = c("Scenario_ID", "date", "animal_ID", "unit_ID_from", "unit_ID_to", "capture", "testResult", "infectionState", "reasonOfTesting"),
+  meaning = c("Scenario ID, the number of scenarios run is given by the parameter `numScenarios`, in Table of [calibration parameters](#calib_param). If you are running only 1 scenario, this number will always be $0$.",
+              "The date on which the test was performed.",
+              "The ID of the animal tested.",
+              "Unit where this event occured; if it was a movement, this is the off-move unit.",
+              "If the event was a movement, this is the on-move unit, if it was death, this field is empty.",
+              "Was the animal captured?",
+              "The result of the test (TRUE = positive, FALSE = negative).",
+              "The infectious status (compartment) of the animal. As the model implemented for wildlife at the moment is `S`-`I`, it can only be `INFECTIOUS`.",
+              "The reason of \"testing\", can be \"movement\" or \"death\"")
+)
+
+knitr::kable(table_out_badger_test,
+             format = knitr::opts_knit$get("rmarkdown.pandoc.to"),
+             caption = "Output file detailing __badger__ test records on the level of the __animal__.",
+             escape = FALSE) %>% 
+  kableExtra::kable_styling(bootstrap_options = "basic")
+```
+
+
+## Sequences {#sequences}
+
+There are two files that print out sequences (lists of mutations) associated with a sample, because the information is collected at the different moments for each individual. They are named a bit unfortunately (and this may change in the future). __node sequences__ is a file that captures the sequences at the moment of infection, while __all sequences__ is a file that captures the moment of detection or end of simulation (if the animal has not been detected).
+
+```{r out_sequences_infection}
+table_out_sequences_infection <- tibble::tibble(
+  `column names` = c("Scenario_ID", "animal_ID", "isCow", "InfectionDate", "DetectionDate", "SNPs"),
+  meaning = c("Scenario ID, the number of scenarios run is given by the parameter `numScenarios`, in Table of [calibration parameters](#calib_param). If you are running only 1 scenario, this number will always be $0$.",
+              "The ID of the animal tested.",
+              "Is the animal a cow?",
+              "The date the animal was infected. (Integer with 1900-01-01 as day $0$).",
+              "The date the animal was detected. (Integer with 1900-01-01 as day $0$).",
+              "List of SNPs the animal's sequence has wrt to a reference (root) sequence, separated by `;`.")
+)
+
+knitr::kable(table_out_sequences_infection,
+             format = knitr::opts_knit$get("rmarkdown.pandoc.to"),
+             caption = "Records of sequences at the __moment of infection__.",
+             escape = FALSE) %>% 
+  kableExtra::kable_styling(bootstrap_options = "basic")
+```
+
+```{r out_sequences_detection}
+table_out_sequences_detection <- tibble::tibble(
+  `column names` = c("Scenario_ID", "date", "animal_ID", "unit_ID_from", "unit_ID_to", "capture", "testResult", "infectionState", "reasonOfTesting"),
+  meaning = c("Scenario ID, the number of scenarios run is given by the parameter `numScenarios`, in Table of [calibration parameters](#calib_param). If you are running only 1 scenario, this number will always be $0$.",
+              "The date on which the test was performed.",
+              "The ID of the animal tested.",
+              "Unit where this event occured; if it was a movement, this is the off-move unit.",
+              "If the event was a movement, this is the on-move unit, if it was death, this field is empty.",
+              "Was the animal captured?",
+              "The result of the test (TRUE = positive, FALSE = negative).",
+              "The infectious status (compartment) of the animal. As the model implemented for wildlife at the moment is `S`-`I`, it can only be `INFECTIOUS`.",
+              "The reason of \"testing\", can be \"movement\" or \"death\"")
+)
+
+knitr::kable(table_out_sequences_detection,
+             format = knitr::opts_knit$get("rmarkdown.pandoc.to"),
+             caption = "Records of sequences at the __moment of detection__ (or end of simulation).",
+             escape = FALSE) %>% 
+  kableExtra::kable_styling(bootstrap_options = "basic")
+```
+
+`r colFmt("__R script__ merge_sequences.R", "script")` merges the two sequence files into one, converts the dates from integer format to YYYY-MM-DD, and renames the column `SNPs` from __node sequences__ to `SNPs_infected` and `SNPs` from __all sequences__ to `SNPs_detected`.
+
+
+## Calibration
+
+File associated with the calibration procedure.
+
+- likelihoods
+- particle
+
+
+
+# R scripts to process output files
+
+```{r R_scripts}
+table_R_scripts <- tibble::tibble(
+  `R script` = c("`merge_time_series.R`", "`merge_sequences.R`"),
+  does = c("Merges the five time series output files, see [Time series](#time_series).",
+           "Merges the two output files that have the records of the sequences, see [Sequences](#sequences).")
+)
+
+knitr::kable(table_R_scripts,
+             format = knitr::opts_knit$get("rmarkdown.pandoc.to"),
+             caption = "List of R scripts that process the output files.",
+             escape = FALSE) %>% 
+  kableExtra::kable_styling(bootstrap_options = "basic")
+```
+
